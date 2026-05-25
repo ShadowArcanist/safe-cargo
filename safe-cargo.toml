@@ -6,4 +6,4 @@ require_report = true
 [registry]
 branch = "master"
 repo = "ShadowArcanist/safe-cargo"
-signing_key = "RWTsNu4uDczxqzGJgV3bkSGSd4zpw2/VQCFMNLeC4Vvcc2G3gOequupn"
+signing_key = "RWReWDw+dePacXXlacWF07gTUvrGRNvrjDnzKewZFfzVNEk4q4tWiEB/"

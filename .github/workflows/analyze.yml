@@ -168,6 +168,7 @@ jobs:
               | jq -r '.version.dl_path as $dl | .version.checksum // empty' 2>/dev/null || true)
 
             if curl -fLsS \
+              -H "User-Agent: safe-cargo-analyzer" \
               "https://crates.io/api/v1/crates/${DEP_NAME}/${DEP_VERSION}/download" \
               -o "${DEP_NAME}-${DEP_VERSION}.tar.gz"; then
 
@@ -266,6 +267,7 @@ jobs:
               mkdir -p "${PREV_DEST}"
               cd "${DOWNLOAD_DIR}"
               if curl -fLsS \
+                -H "User-Agent: safe-cargo-analyzer" \
                 "https://crates.io/api/v1/crates/${DEP_NAME}/${PREV_VER}/download" \
                 -o "${DEP_NAME}-${PREV_VER}.tar.gz"; then
                 python3 "${GITHUB_WORKSPACE}/analyzer/safe_extract.py" \
@@ -437,7 +439,7 @@ jobs:
           # Sign all report files
           SIGN_FAILED=0
           while IFS= read -r -d '' f; do
-            if ! minisign -S -s "$KEY_FILE" -m "$f" 2>/dev/null; then
+            if ! minisign -S -s "$KEY_FILE" -m "$f"; then
               echo "::error::Failed to sign ${f}"
               SIGN_FAILED=1
             fi
