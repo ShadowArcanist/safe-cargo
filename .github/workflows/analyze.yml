@@ -439,7 +439,7 @@ jobs:
           # Sign all report files
           SIGN_FAILED=0
           while IFS= read -r -d '' f; do
-            if ! minisign -S -s "$KEY_FILE" -m "$f"; then
+            if ! minisign -S -W -s "$KEY_FILE" -m "$f"; then
               echo "::error::Failed to sign ${f}"
               SIGN_FAILED=1
             fi
