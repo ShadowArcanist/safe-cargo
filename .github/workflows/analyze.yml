@@ -439,25 +439,31 @@ jobs:
 
           # Sign all report files
           SIGN_FAILED=0
+          REPORT_FILES=()
           while IFS= read -r -d '' f; do
-            if head -n 1 "$KEY_FILE" | grep -q "encrypted secret key"; then
-              if ! printf '%s\n' "${MINISIGN_PASSWORD:-}" | minisign -S -s "$KEY_FILE" -m "$f"; then
-                echo "::error::Failed to sign ${f}"
-                SIGN_FAILED=1
-              fi
-            elif ! minisign -S -W -s "$KEY_FILE" -m "$f"; then
-              echo "::error::Failed to sign ${f}"
-              SIGN_FAILED=1
-            fi
+            REPORT_FILES+=("$f")
           done < <(find reports/ -name "*.json" -print0)
 
+          if [ "${#REPORT_FILES[@]}" -eq 0 ]; then
+            echo "::error::No report JSON files found to sign"
+            SIGN_FAILED=1
+          elif head -n 1 "$KEY_FILE" | grep -q "encrypted secret key"; then
+            if ! printf '%s\n' "${MINISIGN_PASSWORD:-}" | minisign -S -s "$KEY_FILE" -m "${REPORT_FILES[@]}"; then
+              echo "::error::Failed to sign reports"
+              SIGN_FAILED=1
+            fi
+          elif ! minisign -S -W -s "$KEY_FILE" -m "${REPORT_FILES[@]}"; then
+            echo "::error::Failed to sign reports"
+            SIGN_FAILED=1
+          fi
+
           # Verify every JSON has a corresponding signature
-          while IFS= read -r -d '' f; do
+          for f in "${REPORT_FILES[@]}"; do
             if [ ! -f "${f}.minisig" ]; then
               echo "::error::Missing signature for ${f}"
               SIGN_FAILED=1
             fi
-          done < <(find reports/ -name "*.json" -print0)
+          done
 
           if [ "$SIGN_FAILED" -ne 0 ]; then
             echo "::error::Signing verification failed"
