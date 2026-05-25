@@ -1,0 +1,136 @@
+{
+  "crate_name": "tokio",
+  "version": "1.52.3",
+  "published_at": "2026-05-08T12:53:27.539099Z",
+  "analyzed_at": "2026-05-25T12:25:55Z",
+  "release_age_days": 16,
+  "score": 146,
+  "verdict": "FAIL",
+  "triggered_rules": [
+    {
+      "id": "encoded_strings",
+      "tier": 1,
+      "points": 25,
+      "detail": "Potential obfuscated content found: hex-encoded sequences (4 matches, first: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/src/io/util/async_write_ext.rs:653:            /// assert_eq!(writer, b\"\\x00\\x0); "
+    },
+    {
+      "id": "runtime_network_targets",
+      "tier": 3,
+      "points": 3,
+      "detail": "Runtime source contains hardcoded network targets: URLs to untrusted domains (50 matches, first: 674:        /// [1]: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684863(v=vs.85).aspx); "
+    },
+    {
+      "id": "include_code_macros",
+      "tier": 2,
+      "points": 10,
+      "detail": "Uses include! macros or #[path =] overrides (8 occurrences). These can substitute Rust code at compile time. First: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/src/process/mod.rs:229:#[path = \"unix/mod.rs\"]"
+    },
+    {
+      "id": "env_vars_bulk",
+      "tier": 1,
+      "points": 25,
+      "detail": "Bulk environment variable access detected (1 matches). This can exfiltrate all credentials. First: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/src/process/mod.rs:467:    ///     env::vars().filter(|&(ref k, _)|"
+    },
+    {
+      "id": "dynamic_loading",
+      "tier": 1,
+      "points": 25,
+      "detail": "Dynamic library loading detected: Unix FFI patterns (3 matches, first: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/src/io/uring/utils.rs:2:use std::os::unix::ffi::OsStrExt;); "
+    },
+    {
+      "id": "massive_diff",
+      "tier": 2,
+      "points": 10,
+      "detail": "Massive diff detected: ~550 lines changed vs previous version 1.52.2. 11 files differ, 10 files added, 1 files removed."
+    },
+    {
+      "id": "network_runtime_error",
+      "tier": 1,
+      "points": 25,
+      "detail": "Rule 'network_runtime' failed to execute (fail-safe scoring applied): /home/runner/work/safe-cargo/safe-cargo/analyzer/rules/network_runtime.sh: line 13: echo: write error: Broken pipe"
+    },
+    {
+      "id": "unix_net_proc",
+      "tier": 2,
+      "points": 10,
+      "detail": "Unix/Linux-specific attack vectors detected: Unix domain sockets (45 matches, first: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/tests/net_panic.rs:107:    let std_listener = std::os::unix::net::UnixListener:); "
+    },
+    {
+      "id": "use_aliasing",
+      "tier": 2,
+      "points": 10,
+      "detail": "Security-sensitive module aliasing detected (13 matches). Imports may be disguised. First: /tmp/tmp.cHqqKCDqds/current/tokio-1.52.3/src/process/mod.rs:252:use std::process::{Child as StdChild, Command as StdComm"
+    },
+    {
+      "id": "unsafe_blocks",
+      "tier": 3,
+      "points": 3,
+      "detail": "unsafe blocks increased by 1 (753 -> 754) vs previous version 1.52.2."
+    }
+  ],
+  "rules_executed": [
+    "network_build_rs",
+    "process_spawn",
+    "encoded_strings",
+    "env_exfil",
+    "hardcoded_urls",
+    "include_macros",
+    "env_vars_bulk",
+    "asm_ffi",
+    "dynamic_loading",
+    "build_rs_diff",
+    "fs_outside_outdir",
+    "proc_macro_side_effects",
+    "massive_diff",
+    "new_maintainer",
+    "network_runtime",
+    "unix_net_proc",
+    "use_aliasing",
+    "unsafe_blocks",
+    "dep_additions",
+    "build_rs_present",
+    "release_age"
+  ],
+  "rules_failed": [
+    "network_runtime"
+  ],
+  "delta": {
+    "compared_versions": [
+      "1.52.0",
+      "1.52.1",
+      "1.52.2"
+    ],
+    "lines_added": 0,
+    "lines_removed": 0,
+    "new_files": [
+      ".cargo_vcs_info.json",
+      "CHANGELOG.md",
+      "Cargo.lock",
+      "Cargo.toml",
+      "Cargo.toml.orig",
+      "LICENSE",
+      "README.md",
+      "docs",
+      "src",
+      "tests"
+    ],
+    "build_rs_changed": false,
+    "deps_added": [
+      "bytes",
+      "mio",
+      "parking_lot",
+      "pin-project-lite",
+      "tokio-macros"
+    ],
+    "deps_removed": []
+  },
+  "metadata": {
+    "owners": [
+      "carllerche",
+      "Darksonn",
+      "github:tokio-rs:core"
+    ],
+    "repository": "https://github.com/tokio-rs/tokio",
+    "downloads": 7601162
+  }
+}
