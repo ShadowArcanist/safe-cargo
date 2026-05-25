@@ -25,7 +25,8 @@ while IFS= read -r line; do
   if [ -n "$FILE_A" ]; then
     FILE_B=$(echo "$line" | sed -n 's/^Files .* and \(.*\) differ$/\1/p' 2>/dev/null || true)
     if [ -n "$FILE_B" ]; then
-      FILE_DIFF=$(diff "$FILE_A" "$FILE_B" 2>/dev/null | grep -c '^[<>]' || echo "0")
+      FILE_DIFF=$(diff "$FILE_A" "$FILE_B" 2>/dev/null | grep -c '^[<>]' || true)
+      [ -z "$FILE_DIFF" ] && FILE_DIFF=0
       CHANGED_LINES=$((CHANGED_LINES + FILE_DIFF))
     fi
   fi

@@ -33,7 +33,8 @@ if [ ! -f "$PREV_BUILD_RS" ]; then
 else
   # Check if build.rs changed
   if ! diff -q "$BUILD_RS" "$PREV_BUILD_RS" > /dev/null 2>&1; then
-    DIFF_LINES=$(diff "$BUILD_RS" "$PREV_BUILD_RS" 2>/dev/null | grep -c '^[<>]' || echo "0")
+    DIFF_LINES=$(diff "$BUILD_RS" "$PREV_BUILD_RS" 2>/dev/null | grep -c '^[<>]' || true)
+    [ -z "$DIFF_LINES" ] && DIFF_LINES=0
     jq -n -c \
       --arg id "build_rs_diff" \
       --argjson tier 2 \

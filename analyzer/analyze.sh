@@ -154,8 +154,10 @@ if [ -d "$PREV_VERSIONS_DIR" ]; then
     # Count lines added and removed
     DIFF_FULL=$(diff -r "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null || true)
     if [ -n "$DIFF_FULL" ]; then
-      LINES_ADDED=$(echo "$DIFF_FULL" | grep -c '^< ' || echo "0")
-      LINES_REMOVED=$(echo "$DIFF_FULL" | grep -c '^> ' || echo "0")
+      LINES_ADDED=$(echo "$DIFF_FULL" | grep -c '^< ' || true)
+      LINES_REMOVED=$(echo "$DIFF_FULL" | grep -c '^> ' || true)
+      [ -z "$LINES_ADDED" ] && LINES_ADDED=0
+      [ -z "$LINES_REMOVED" ] && LINES_REMOVED=0
     fi
 
     # Detect new files (files only in SOURCE_DIR)
