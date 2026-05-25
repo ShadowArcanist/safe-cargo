@@ -115,6 +115,7 @@ CRATE_META=$(curl -sf "https://crates.io/api/v1/crates/${CRATE_NAME}/${VERSION}"
 
 PUBLISHED=$(echo "$CRATE_META" | jq -r '.version.created_at // empty' 2>/dev/null || echo "")
 DOWNLOADS=$(echo "$CRATE_META" | jq -r '.version.downloads // 0' 2>/dev/null || echo "0")
+[ -z "$DOWNLOADS" ] && DOWNLOADS="0"
 
 CRATE_INFO=$(curl -sf "https://crates.io/api/v1/crates/${CRATE_NAME}" \
   -H "User-Agent: safe-cargo-analyzer" 2>/dev/null || echo "{}")
@@ -203,13 +204,13 @@ print(json.dumps({
 fi
 
 DELTA=$(jq -n \
-  --argjson compared_versions "$COMPARED_VERSIONS" \
-  --argjson lines_added "$LINES_ADDED" \
-  --argjson lines_removed "$LINES_REMOVED" \
-  --argjson new_files "$NEW_FILES" \
-  --argjson build_rs_changed "$BUILD_RS_CHANGED" \
-  --argjson deps_added "$DEPS_ADDED" \
-  --argjson deps_removed "$DEPS_REMOVED" \
+  --argjson compared_versions "${COMPARED_VERSIONS:-[]}" \
+  --argjson lines_added "${LINES_ADDED:-0}" \
+  --argjson lines_removed "${LINES_REMOVED:-0}" \
+  --argjson new_files "${NEW_FILES:-[]}" \
+  --argjson build_rs_changed "${BUILD_RS_CHANGED:-false}" \
+  --argjson deps_added "${DEPS_ADDED:-[]}" \
+  --argjson deps_removed "${DEPS_REMOVED:-[]}" \
   '{
     compared_versions: $compared_versions,
     lines_added: $lines_added,
@@ -229,9 +230,9 @@ jq -n \
   --argjson score "$TOTAL_SCORE" \
   --arg verdict "$VERDICT" \
   --argjson triggered_rules "$FINDINGS" \
-  --argjson downloads "$DOWNLOADS" \
-  --arg repo "$REPO" \
-  --argjson owners "$OWNERS" \
+  --argjson downloads "${DOWNLOADS:-0}" \
+  --arg repo "${REPO:-}" \
+  --argjson owners "${OWNERS:-[]}" \
   --argjson delta "$DELTA" \
   --argjson rules_executed "$RULES_EXECUTED" \
   --argjson rules_failed "$RULES_FAILED" \
