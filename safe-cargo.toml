@@ -1,0 +1,9 @@
+[policy]
+max_score = 40
+min_release_age = "3d"
+require_report = true
+
+[registry]
+branch = "master"
+repo = "ShadowArcanist/safe-cargo"
+signing_key = "RWTsNu4uDczxqzGJgV3bkSGSd4zpw2/VQCFMNLeC4Vvcc2G3gOequupn"
