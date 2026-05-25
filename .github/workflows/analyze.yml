@@ -529,12 +529,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          GENERATED_REPORTS_DIR=$(mktemp -d)
+          cp -a reports "${GENERATED_REPORTS_DIR}/reports"
+
           git fetch origin "${BRANCH}" || true
           if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
             git checkout -B "${BRANCH}" "origin/${BRANCH}"
           else
             git checkout -b "${BRANCH}"
           fi
+
+          rm -rf reports
+          cp -a "${GENERATED_REPORTS_DIR}/reports" reports
 
           git add reports/
           if git diff --cached --quiet; then
