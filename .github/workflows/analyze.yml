@@ -1,0 +1,530 @@
+name: Analyze Crate
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "Crate name to analyze"
+        required: true
+        type: string
+      version:
+        description: "Version to analyze (defaults to latest)"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: analyze-${{ inputs.crate }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout safe-cargo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate inputs
+        env:
+          CRATE: ${{ inputs.crate }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # Validate crate name: must match crates.io package name grammar
+          if ! echo "$CRATE" | grep -qE '^[a-zA-Z][a-zA-Z0-9_-]*$'; then
+            echo "::error::Invalid crate name '${CRATE}'. Must match [a-zA-Z][a-zA-Z0-9_-]*"
+            exit 1
+          fi
+          if [ ${#CRATE} -gt 64 ]; then
+            echo "::error::Crate name exceeds 64 characters"
+            exit 1
+          fi
+
+          # Validate version: if provided, must be valid semver
+          if [ -n "$VERSION" ]; then
+            if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'; then
+              echo "::error::Invalid version '${VERSION}'. Must be valid semver (e.g. 1.2.3, 1.2.3-beta.1)"
+              exit 1
+            fi
+          fi
+
+          echo "Inputs validated: crate=${CRATE}, version=${VERSION:-latest}"
+
+      - name: Install tools
+        run: |
+          # ubuntu-24.04 has Rust, jq, Python, curl, and gh CLI.
+          sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
+      - name: Resolve version
+        id: resolve
+        env:
+          CRATE: ${{ inputs.crate }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version specified, fetching latest from crates.io..."
+            VERSION=$(curl -s "https://crates.io/api/v1/crates/${CRATE}" \
+              -H "User-Agent: safe-cargo-analyzer" \
+              | jq -r '.crate.max_version')
+            if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+              echo "::error::Could not resolve latest version for crate '${CRATE}'"
+              exit 1
+            fi
+          fi
+
+          # Validate resolved version (defense-in-depth for API-resolved values)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version '${VERSION}'"
+            exit 1
+          fi
+
+          echo "crate=${CRATE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Analyzing ${CRATE}@${VERSION}"
+
+      - name: Create temp project and resolve dependency tree
+        id: deps
+        env:
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          WORKDIR=$(mktemp -d)
+
+          # Create a minimal Cargo project to resolve the full dep tree
+          mkdir -p "${WORKDIR}/src"
+          echo "fn main() {}" > "${WORKDIR}/src/main.rs"
+          cat > "${WORKDIR}/Cargo.toml" <<TOML
+          [package]
+          name = "dep-resolver"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          "${CRATE}" = "=${VERSION}"
+          TOML
+
+          # Run cargo metadata to get full dep tree (does NOT compile anything)
+          cd "${WORKDIR}"
+          cargo metadata --format-version 1 --no-deps 2>/dev/null > /dev/null || true
+          cargo metadata --format-version 1 2>/dev/null > "${GITHUB_WORKSPACE}/deps.json"
+
+          echo "workdir=${WORKDIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Filter already-analyzed deps
+        id: filter
+        run: |
+          python3 analyzer/filter_missing.py deps.json reports/ > missing_deps.txt
+          echo "count=$(wc -l < missing_deps.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          echo "Dependencies to analyze:"
+          cat missing_deps.txt
+
+      - name: Download and analyze each dependency
+        if: steps.filter.outputs.count != '0'
+        env:
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          chmod +x analyzer/analyze.sh
+          chmod +x analyzer/rules/*.sh
+
+          while IFS='@' read -r DEP_NAME DEP_VERSION; do
+            [ -z "$DEP_NAME" ] && continue
+
+            # Validate dep name and version before use
+            if [[ ! "$DEP_NAME" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+              echo "::warning::Skipping invalid dep name: ${DEP_NAME}"
+              continue
+            fi
+            if [[ ! "$DEP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
+              echo "::warning::Skipping invalid dep version: ${DEP_VERSION}"
+              continue
+            fi
+
+            echo "========================================="
+            echo "Analyzing ${DEP_NAME}@${DEP_VERSION}"
+            echo "========================================="
+
+            REPORT_DIR="${GITHUB_WORKSPACE}/reports/${DEP_NAME}"
+            mkdir -p "${REPORT_DIR}"
+
+            if ! (
+            # Create directories
+            DOWNLOAD_DIR=$(mktemp -d)
+            PREV_DIR=$(mktemp -d)
+
+            # Download current version source with checksum verification
+            cd "${DOWNLOAD_DIR}"
+            mkdir -p "current"
+
+            # Fetch expected checksum from crates.io API
+            EXPECTED_CKSUM=$(curl -sf "https://crates.io/api/v1/crates/${DEP_NAME}/${DEP_VERSION}" \
+              -H "User-Agent: safe-cargo-analyzer" 2>/dev/null \
+              | jq -r '.version.dl_path as $dl | .version.checksum // empty' 2>/dev/null || true)
+
+            if curl -fLsS \
+              "https://crates.io/api/v1/crates/${DEP_NAME}/${DEP_VERSION}/download" \
+              -o "${DEP_NAME}-${DEP_VERSION}.tar.gz"; then
+
+              # Verify checksum
+              if [ -z "$EXPECTED_CKSUM" ]; then
+                echo "::warning::Checksum unavailable for ${DEP_NAME}@${DEP_VERSION}, skipping integrity check"
+              fi
+              if [ -n "$EXPECTED_CKSUM" ]; then
+                ACTUAL_CKSUM=$(sha256sum "${DEP_NAME}-${DEP_VERSION}.tar.gz" | cut -d' ' -f1)
+                if [ "$ACTUAL_CKSUM" != "$EXPECTED_CKSUM" ]; then
+                  echo "::error::Checksum mismatch for ${DEP_NAME}@${DEP_VERSION}: expected ${EXPECTED_CKSUM}, got ${ACTUAL_CKSUM}"
+                  jq -n \
+                    --arg crate_name "$DEP_NAME" \
+                    --arg version "$DEP_VERSION" \
+                    --arg expected "$EXPECTED_CKSUM" \
+                    --arg actual "$ACTUAL_CKSUM" \
+                    '{
+                      crate_name: $crate_name,
+                      version: $version,
+                      published_at: null,
+                      analyzed_at: (now | todate),
+                      release_age_days: 0,
+                      score: 100,
+                      verdict: "FAIL",
+                      triggered_rules: [{"id": "checksum_mismatch", "tier": 1, "points": 100, "detail": ("Download checksum mismatch: expected " + $expected + " got " + $actual)}],
+                      delta: {"compared_versions": [], "lines_added": 0, "lines_removed": 0, "new_files": [], "build_rs_changed": false, "deps_added": [], "deps_removed": []},
+                      metadata: {"owners": [], "repository": null, "downloads": 0}
+                    }' > "${REPORT_DIR}/${DEP_VERSION}.json"
+                  exit 0
+                fi
+              fi
+
+              if ! python3 "${GITHUB_WORKSPACE}/analyzer/safe_extract.py" \
+                "${DEP_NAME}-${DEP_VERSION}.tar.gz" "current" 2>/dev/null; then
+                echo "::warning::Extraction failed for ${DEP_NAME}@${DEP_VERSION}"
+                # Generate FAIL report for extraction failure
+                jq -n \
+                  --arg crate_name "$DEP_NAME" \
+                  --arg version "$DEP_VERSION" \
+                  '{
+                    crate_name: $crate_name,
+                    version: $version,
+                    published_at: null,
+                    analyzed_at: (now | todate),
+                    release_age_days: 0,
+                    score: 100,
+                    verdict: "FAIL",
+                    triggered_rules: [{"id": "extraction_failed", "tier": 1, "points": 100, "detail": "Source code extraction failed"}],
+                    delta: {"compared_versions": [], "lines_added": 0, "lines_removed": 0, "new_files": [], "build_rs_changed": false, "deps_added": [], "deps_removed": []},
+                    metadata: {"owners": [], "repository": null, "downloads": 0}
+                  }' > "${REPORT_DIR}/${DEP_VERSION}.json"
+                exit 0
+              fi
+            fi
+            SOURCE_DIR="${DOWNLOAD_DIR}/current"
+
+            # Find the actual package root (tarballs often extract into name-version/ subdir)
+            if [ -f "${SOURCE_DIR}/Cargo.toml" ]; then
+              : # Cargo.toml at root level — good
+            elif SUBDIR=$(find "${SOURCE_DIR}" -maxdepth 2 -name "Cargo.toml" -print -quit 2>/dev/null) && [ -n "$SUBDIR" ]; then
+              SOURCE_DIR="$(dirname "$SUBDIR")"
+            fi
+
+            # Verify source was downloaded successfully
+            if [ ! -f "${SOURCE_DIR}/Cargo.toml" ]; then
+              echo "::warning::Failed to download source for ${DEP_NAME}@${DEP_VERSION}, marking as failed"
+              # Generate a failed report instead of a passing one
+              jq -n \
+                --arg crate_name "$DEP_NAME" \
+                --arg version "$DEP_VERSION" \
+                '{
+                  crate_name: $crate_name,
+                  version: $version,
+                  published_at: null,
+                  analyzed_at: (now | todate),
+                  release_age_days: 0,
+                  score: 100,
+                  verdict: "FAIL",
+                  triggered_rules: [{"id": "download_failed", "tier": 1, "points": 100, "detail": "Source code could not be downloaded or extracted"}],
+                  delta: {"compared_versions": [], "lines_added": 0, "lines_removed": 0, "new_files": [], "build_rs_changed": false, "deps_added": [], "deps_removed": []},
+                  metadata: {"owners": [], "repository": null, "downloads": 0}
+                }' > "${REPORT_DIR}/${DEP_VERSION}.json"
+              exit 0
+            fi
+
+            # Fetch previous 3 versions for diffing
+            PREV_VERSIONS=$(curl -s "https://crates.io/api/v1/crates/${DEP_NAME}/versions" \
+              -H "User-Agent: safe-cargo-analyzer" \
+              | jq -r --arg ver "$DEP_VERSION" \
+                '[.versions[] | select(.yanked == false) | .num] | to_entries | map(select(.value == $ver)) as $idx | if ($idx | length) > 0 then [.[] | select(.key > $idx[0].key)] | .[0:3] | .[].value else empty end' \
+              2>/dev/null || echo "")
+
+            PREV_VERSIONS_DIR="${PREV_DIR}"
+            for PREV_VER in $PREV_VERSIONS; do
+              PREV_DEST="${PREV_DIR}/${PREV_VER}"
+              mkdir -p "${PREV_DEST}"
+              cd "${DOWNLOAD_DIR}"
+              if curl -fLsS \
+                "https://crates.io/api/v1/crates/${DEP_NAME}/${PREV_VER}/download" \
+                -o "${DEP_NAME}-${PREV_VER}.tar.gz"; then
+                python3 "${GITHUB_WORKSPACE}/analyzer/safe_extract.py" \
+                  "${DEP_NAME}-${PREV_VER}.tar.gz" "${PREV_DEST}" 2>/dev/null || true
+              fi
+              cd "${DOWNLOAD_DIR}"
+              sleep 1  # Rate limit crates.io
+            done
+
+            PREV_COUNT=$(ls -1 "$PREV_VERSIONS_DIR" 2>/dev/null | wc -l)
+            if [ "$PREV_COUNT" -eq 0 ]; then
+              echo "::warning::No previous versions obtained for ${DEP_NAME}@${DEP_VERSION}, diff analysis will be limited"
+            fi
+
+            # Run analysis
+            cd "${GITHUB_WORKSPACE}"
+            REPORT=$(./analyzer/analyze.sh "${SOURCE_DIR}" "${DEP_NAME}" "${DEP_VERSION}" "${PREV_DIR}")
+
+            # Write report
+            echo "$REPORT" | jq '.' > "${REPORT_DIR}/${DEP_VERSION}.json"
+
+            # Clean up temp dirs
+            rm -rf "${DOWNLOAD_DIR}" "${PREV_DIR}"
+
+            ); then
+              echo "::warning::Analysis failed for ${DEP_NAME}@${DEP_VERSION}, marking as failed"
+              jq -n \
+                --arg crate_name "$DEP_NAME" \
+                --arg version "$DEP_VERSION" \
+                '{
+                  crate_name: $crate_name,
+                  version: $version,
+                  published_at: null,
+                  analyzed_at: (now | todate),
+                  release_age_days: 0,
+                  score: 100,
+                  verdict: "FAIL",
+                  triggered_rules: [{"id": "analysis_failed", "tier": 1, "points": 100, "detail": "Analyzer failed before producing a report"}],
+                  delta: {"compared_versions": [], "lines_added": 0, "lines_removed": 0, "new_files": [], "build_rs_changed": false, "deps_added": [], "deps_removed": []},
+                  metadata: {"owners": [], "repository": null, "downloads": 0}
+                }' > "${REPORT_DIR}/${DEP_VERSION}.json"
+            fi
+
+            # Rate limit
+            sleep 1
+
+          done < missing_deps.txt
+
+
+      - name: Generate manifest
+        if: always() && hashFiles('deps.json') != ''
+        env:
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          mkdir -p reports/_manifests
+          python3 -c "
+          import json, sys
+          with open('deps.json') as f:
+              meta = json.load(f)
+          deps = []
+          for pkg in meta.get('packages', []):
+              if pkg['name'] == 'dep-resolver':
+                  continue
+              deps.append({'name': pkg['name'], 'version': pkg['version']})
+          manifest = {
+              'requested_crate': sys.argv[1],
+              'requested_version': sys.argv[2],
+              'analyzed_at': '$(date -u +%Y-%m-%dT%H:%M:%SZ)',
+              'dependencies': deps
+          }
+          print(json.dumps(manifest, indent=2))
+          " "$CRATE" "$VERSION" > "reports/_manifests/${CRATE}-${VERSION}.json"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: analysis-reports
+          path: |
+            reports/
+            missing_deps.txt
+            deps.json
+          retention-days: 1
+
+      - name: Summary (no new deps)
+        if: steps.filter.outputs.count == '0'
+        env:
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          echo "All dependencies for ${CRATE}@${VERSION} have already been analyzed."
+          echo "No PR needed."
+
+  sign-and-pr:
+    needs: analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout safe-cargo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: analysis-reports
+
+      - name: Validate artifact data
+        run: |
+          python3 analyzer/validate_artifacts.py reports deps.json
+
+          MANIFEST_FILE=$(ls reports/_manifests/*.json 2>/dev/null | head -1)
+          if [ -z "$MANIFEST_FILE" ]; then
+            echo "::error::No manifest files found in artifacts"
+            exit 1
+          fi
+          CRATE=$(jq -r '.requested_crate' "$MANIFEST_FILE")
+          VERSION=$(jq -r '.requested_version' "$MANIFEST_FILE")
+          if [[ ! "$CRATE" =~ ^[a-zA-Z][a-zA-Z0-9_-]{0,63}$ ]]; then
+            echo "::error::Invalid crate name in manifest"
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version in manifest"
+            exit 1
+          fi
+
+      - name: Check for new deps
+        id: check
+        run: |
+          if [ ! -f missing_deps.txt ]; then
+            echo "count=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "count=$(wc -l < missing_deps.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install minisign
+        if: steps.check.outputs.count != '0'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+
+      - name: Sign reports
+        if: steps.check.outputs.count != '0'
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MINISIGN_PRIVATE_KEY" ]; then
+            echo "::error::MINISIGN_PRIVATE_KEY is required to sign reports"
+            exit 1
+          fi
+
+          # Match the compact JSON representation verified by the CLI.
+          find reports/ -name "*.json" -print0 | while IFS= read -r -d '' file; do
+            tmp="${file}.tmp"
+            jq -c . "$file" > "$tmp"
+            mv "$tmp" "$file"
+          done
+
+          umask 077
+          KEY_FILE=$(mktemp)
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$MINISIGN_PRIVATE_KEY" > "$KEY_FILE"
+
+          # Sign all report files
+          SIGN_FAILED=0
+          while IFS= read -r -d '' f; do
+            if ! minisign -S -s "$KEY_FILE" -m "$f" 2>/dev/null; then
+              echo "::error::Failed to sign ${f}"
+              SIGN_FAILED=1
+            fi
+          done < <(find reports/ -name "*.json" -print0)
+
+          # Verify every JSON has a corresponding signature
+          while IFS= read -r -d '' f; do
+            if [ ! -f "${f}.minisig" ]; then
+              echo "::error::Missing signature for ${f}"
+              SIGN_FAILED=1
+            fi
+          done < <(find reports/ -name "*.json" -print0)
+
+          if [ "$SIGN_FAILED" -ne 0 ]; then
+            echo "::error::Signing verification failed"
+            exit 1
+          fi
+
+      - name: Resolve version from manifest
+        if: steps.check.outputs.count != '0'
+        id: resolve
+        run: |
+          # Extract crate and version from the manifest file
+          MANIFEST=$(ls reports/_manifests/*.json 2>/dev/null | head -1)
+          if [ -z "$MANIFEST" ]; then
+            echo "::error::No manifest found"
+            exit 1
+          fi
+          CRATE=$(jq -r '.requested_crate' "$MANIFEST")
+          VERSION=$(jq -r '.requested_version' "$MANIFEST")
+          echo "crate=${CRATE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate PR summary and determine risk level
+        if: steps.check.outputs.count != '0'
+        id: summary
+        env:
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          BODY=$(python3 analyzer/pr_summary.py \
+            "reports/_manifests/${CRATE}-${VERSION}.json" \
+            "${CRATE}" "${VERSION}" reports/)
+
+          echo "$BODY" > pr_body.md
+
+          # Determine highest risk level from reports generated this run
+          MAX_SCORE=0
+          while IFS='@' read -r DEP_NAME DEP_VERSION; do
+            [ -z "$DEP_NAME" ] && continue
+            SCORE=$(jq -r '.score // 0' "reports/${DEP_NAME}/${DEP_VERSION}.json" 2>/dev/null || echo "0")
+            [ "$SCORE" -gt "$MAX_SCORE" ] && MAX_SCORE="$SCORE"
+          done < missing_deps.txt
+
+          if [ "$MAX_SCORE" -ge 41 ]; then
+            echo "risk=[High Risk]" >> "$GITHUB_OUTPUT"
+          elif [ "$MAX_SCORE" -ge 16 ]; then
+            echo "risk=[Medium Risk]" >> "$GITHUB_OUTPUT"
+          else
+            echo "risk=[Low Risk]" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRATE: ${{ steps.resolve.outputs.crate }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          RISK: ${{ steps.summary.outputs.risk }}
+        run: |
+          SAFE_CRATE=$(echo "${CRATE}" | tr -dc 'a-zA-Z0-9_-')
+          SAFE_VERSION=$(echo "${VERSION}" | tr -dc 'a-zA-Z0-9._-')
+          BRANCH="analyze/${SAFE_CRATE}-${SAFE_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "${BRANCH}"
+          git add reports/
+          git commit -m "analyze: ${CRATE}@${VERSION}
+
+          Automated supply-chain analysis of ${CRATE} v${VERSION} and its dependencies."
+
+          git push origin "${BRANCH}"
+
+          gh pr create \
+            --title "${RISK} analyze: ${CRATE}@${VERSION}" \
+            --body-file pr_body.md \
+            --base main \
+            --head "${BRANCH}"
