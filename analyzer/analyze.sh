@@ -160,15 +160,28 @@ if [ -d "$PREV_VERSIONS_DIR" ]; then
       [ -z "$LINES_REMOVED" ] && LINES_REMOVED=0
     fi
 
-    # Detect new files (files only in SOURCE_DIR)
-    # Use awk instead of sed to avoid SOURCE_DIR metacharacter issues
-    NEW_FILES=$(diff -rq "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null \
-      | grep "^Only in ${SOURCE_DIR}" \
-      | awk -v prefix="$SOURCE_DIR" '{
-          sub("^Only in " prefix "[/]*: *", "");
-          print
-        }' \
-      | jq -R -s 'split("\n") | map(select(. != ""))' || echo "[]")
+    # Detect new files (files only in SOURCE_DIR). diff returns 1 when
+    # differences exist, so capture its output before filtering under pipefail.
+    DIFF_BRIEF=$(diff -rq "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null || true)
+    NEW_FILES=$(printf '%s\n' "$DIFF_BRIEF" \
+      | awk -v prefix="$SOURCE_DIR" '
+          index($0, "Only in " prefix) == 1 {
+            line = substr($0, length("Only in ") + 1)
+            sep = index(line, ": ")
+            if (sep == 0) {
+              next
+            }
+
+            dir = substr(line, 1, sep - 1)
+            name = substr(line, sep + 2)
+            if (dir == prefix) {
+              print name
+            } else if (index(dir, prefix "/") == 1) {
+              print substr(dir, length(prefix) + 2) "/" name
+            }
+          }
+        ' \
+      | jq -R -s 'split("\n") | map(select(. != ""))')
 
     # Check if build.rs changed
     if [ -f "${SOURCE_DIR}/build.rs" ] && [ -f "${PREV_VERSIONS_DIR}/${LATEST_PREV}/build.rs" ]; then
@@ -205,8 +218,6 @@ print(json.dumps({
   fi
 fi
 
-echo "DEBUG: Building delta JSON..." >&2
-echo "DEBUG: LINES_ADDED=${LINES_ADDED:-0} LINES_REMOVED=${LINES_REMOVED:-0}" >&2
 DELTA=$(jq -n \
   --argjson compared_versions "${COMPARED_VERSIONS:-[]}" \
   --argjson lines_added "${LINES_ADDED:-0}" \
@@ -225,8 +236,6 @@ DELTA=$(jq -n \
     deps_removed: $deps_removed
   }')
 
-echo "DEBUG: Building final report JSON..." >&2
-echo "DEBUG: TOTAL_SCORE=${TOTAL_SCORE:-?} DOWNLOADS=${DOWNLOADS:-?} AGE_DAYS=${AGE_DAYS:-?}" >&2
 jq -n \
   --arg crate_name "$CRATE_NAME" \
   --arg version "$VERSION" \
@@ -238,7 +247,7 @@ jq -n \
   --argjson downloads "${DOWNLOADS:-0}" \
   --arg repo "${REPO:-}" \
   --argjson owners "${OWNERS:-[]}" \
-  --argjson delta "${DELTA:-{}}" \
+  --argjson delta "$DELTA" \
   --argjson rules_executed "${RULES_EXECUTED:-[]}" \
   --argjson rules_failed "${RULES_FAILED:-[]}" \
   '{

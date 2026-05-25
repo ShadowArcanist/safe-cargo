@@ -14,8 +14,11 @@ LATEST_PREV=$(ls -1 "$PREV_VERSIONS_DIR" 2>/dev/null | sort -V | tail -1 || true
 [ -z "$LATEST_PREV" ] && exit 0
 [ -d "${PREV_VERSIONS_DIR}/${LATEST_PREV}" ] || exit 0
 
+DIFF_BRIEF=$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null || true)
+
 # Count changed lines between versions
-DIFF_LINES=$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+DIFF_LINES=$(printf '%s\n' "$DIFF_BRIEF" | wc -l | tr -d ' ')
+[ -z "$DIFF_BRIEF" ] && DIFF_LINES=0
 
 # Get a more detailed line count
 CHANGED_LINES=0
@@ -30,11 +33,11 @@ while IFS= read -r line; do
       CHANGED_LINES=$((CHANGED_LINES + FILE_DIFF))
     fi
   fi
-done <<< "$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null || true)"
+done <<< "$DIFF_BRIEF"
 
 # Also count lines from files only in one version
-ONLY_IN_CURRENT=$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null | awk -v dir="$SOURCE_DIR" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
-ONLY_IN_PREV=$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null | awk -v dir="$PREV_VERSIONS_DIR" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
+ONLY_IN_CURRENT=$(printf '%s\n' "$DIFF_BRIEF" | awk -v dir="$SOURCE_DIR" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
+ONLY_IN_PREV=$(printf '%s\n' "$DIFF_BRIEF" | awk -v dir="${PREV_VERSIONS_DIR}/${LATEST_PREV}" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
 
 TOTAL_CHANGES=$((CHANGED_LINES + ONLY_IN_CURRENT * 50 + ONLY_IN_PREV * 50))
 
