@@ -425,10 +425,10 @@ jobs:
             exit 1
           fi
 
-          # Match the compact JSON representation verified by the CLI.
+          # Normalize JSON before signing. The CLI verifies these exact bytes.
           find reports/ -name "*.json" -print0 | while IFS= read -r -d '' file; do
             tmp="${file}.tmp"
-            jq -c . "$file" > "$tmp"
+            jq . "$file" > "$tmp"
             mv "$tmp" "$file"
           done
 

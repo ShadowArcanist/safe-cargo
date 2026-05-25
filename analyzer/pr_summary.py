@@ -39,6 +39,28 @@ def format_age(age_days) -> str:
         return f"{years}y"
 
 
+def format_downloads(downloads) -> str:
+    try:
+        value = int(downloads)
+    except (TypeError, ValueError):
+        return "?"
+    return f"{value:,}"
+
+
+def rule_group(rule: dict) -> str:
+    """Return the human review group for a rule."""
+    tier = int(rule.get("tier", 3) or 3)
+    return "risk" if tier <= 2 else "info"
+
+
+def format_rule(rule: dict) -> str:
+    tier = rule.get("tier", "?")
+    rule_id = rule.get("id", "unknown")
+    points = rule.get("points", 0)
+    detail = rule.get("detail", "")
+    return f"- `T{tier}` `{rule_id}` (+{points}): {detail}"
+
+
 def main():
     if len(sys.argv) < 5:
         print(
@@ -90,9 +112,11 @@ def main():
 
         age_days = None
         triggered_rules = []
+        metadata = {}
         if report:
             age_days = report.get("release_age_days")
             triggered_rules = report.get("triggered_rules", [])
+            metadata = report.get("metadata", {})
 
         if verdict == "FAIL":
             fail_count += 1
@@ -113,6 +137,10 @@ def main():
                 "age": format_age(age_days),
                 "verdict": verdict_emoji(verdict),
                 "flags": flags_display,
+                "risk_rules": [r for r in triggered_rules if rule_group(r) == "risk"],
+                "info_rules": [r for r in triggered_rules if rule_group(r) == "info"],
+                "repository": metadata.get("repository"),
+                "downloads": metadata.get("downloads", 0),
             }
         )
 
@@ -127,18 +155,18 @@ def main():
 
     # Build markdown
     lines = []
-    lines.append(f"## Analysis: {crate}@{version}")
+    lines.append(f"## Analysis report for `{crate}@{version}`")
     lines.append("")
     summary_parts = [
-        f"**{len(rows)}** dependencies analyzed:",
-        f"**{fail_count}** FAIL, **{warn_count}** WARN, **{pass_count}** PASS",
+        f"Analyzed **{len(rows)}** dependencies.",
+        f"Result: **{fail_count}** FAIL, **{warn_count}** WARN, **{pass_count}** PASS.",
     ]
     if unknown_count > 0:
-        summary_parts.append(f"**{unknown_count}** unknown (no report)")
+        summary_parts.append(f"**{unknown_count}** unknown.")
     lines.append(" ".join(summary_parts))
     lines.append("")
-    lines.append("| Crate | Version | Score | Age | Verdict | Flags |")
-    lines.append("|-------|---------|-------|-----|---------|-------|")
+    lines.append("| Dependency | Verdict | Score | Age | Review notes |")
+    lines.append("|------------|---------|-------|-----|--------------|")
 
     for row in rows:
         score_str = (
@@ -146,17 +174,23 @@ def main():
             if isinstance(row["score"], (int, float))
             else str(row["score"])
         )
+        notes = []
+        if row["risk_rules"]:
+            notes.append(f"{len(row['risk_rules'])} risk")
+        if row["info_rules"]:
+            notes.append(f"{len(row['info_rules'])} info")
+        notes_str = ", ".join(notes) if notes else "None"
         lines.append(
-            f"| {row['crate']} | {row['version']} | {score_str} "
-            f"| {row['age']} | {row['verdict']} | {row['flags']} |"
+            f"| `{row['crate']}@{row['version']}` | {row['verdict']} | {score_str} "
+            f"| {row['age']} | {notes_str} |"
         )
 
     lines.append("")
 
-    # Add details for any FAIL or WARN crates
-    flagged = [r for r in rows if r["verdict"] in ("FAIL", "WARN")]
+    # Add details for any dependency with review notes.
+    flagged = [r for r in rows if r["risk_rules"] or r["info_rules"]]
     if flagged:
-        lines.append("### Flagged Dependencies")
+        lines.append("### Needs Review")
         lines.append("")
         for row in flagged:
             dep_name = row["crate"]
@@ -165,20 +199,27 @@ def main():
             try:
                 with open(report_path, "r") as f:
                     report = json.load(f)
-                lines.append(f"<details><summary>{dep_name}@{dep_version} ({row['verdict']})</summary>")
+                metadata = report.get("metadata", {})
+                repo = metadata.get("repository") or "not declared"
+                downloads = format_downloads(metadata.get("downloads"))
+                lines.append(f"#### `{dep_name}@{dep_version}` — {row['verdict']} ({row['score']}/100)")
                 lines.append("")
-                triggered_rules = report.get("triggered_rules", [])
-                if triggered_rules:
-                    for rule in triggered_rules:
-                        tier = rule.get("tier", "?")
-                        rule_id = rule.get("id", "unknown")
-                        detail = rule.get("detail", "")
-                        points = rule.get("points", 0)
-                        lines.append(f"- **[T{tier}]** `{rule_id}` (+{points}pts): {detail}")
-                else:
-                    lines.append("No specific findings.")
+                lines.append(f"- Age: {row['age']}")
+                lines.append(f"- Downloads for this version: {downloads}")
+                lines.append(f"- Repository: {repo}")
                 lines.append("")
-                lines.append("</details>")
+                if row["risk_rules"]:
+                    lines.append("#### Risk Signals")
+                    lines.append("")
+                    for rule in row["risk_rules"]:
+                        lines.append(format_rule(rule))
+                    lines.append("")
+                if row["info_rules"]:
+                    lines.append("#### Informational Signals")
+                    lines.append("")
+                    for rule in row["info_rules"]:
+                        lines.append(format_rule(rule))
+                    lines.append("")
                 lines.append("")
             except (FileNotFoundError, json.JSONDecodeError):
                 lines.append(f"- **{dep_name}@{dep_version}**: Report not available")

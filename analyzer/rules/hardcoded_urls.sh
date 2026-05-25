@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Tier 1 (25 points): Detect hardcoded URLs and IP addresses in build.rs and runtime source
+# Detect hardcoded URLs and IP addresses.
+#
+# Build-time network targets are Tier 1 because build.rs runs during
+# installation/compilation. Runtime literals are Tier 3 review notes: useful for
+# human review, but not enough by themselves to imply a supply-chain attack.
 # Flags: IP addresses, URLs not pointing to trusted domains
 
 SOURCE_DIR="${1:?Usage: hardcoded_urls.sh <source_dir>}"
 
 BUILD_RS="${SOURCE_DIR}/build.rs"
 
-FINDINGS=""
+BUILD_FINDINGS=""
+RUNTIME_FINDINGS=""
 
 # Check build.rs (higher risk — runs at compile time)
 if [ -f "$BUILD_RS" ]; then
@@ -24,13 +29,13 @@ if [ -f "$BUILD_RS" ]; then
   if [ -n "$IP_MATCHES" ]; then
     COUNT=$(echo "$IP_MATCHES" | wc -l | tr -d ' ')
     FIRST=$(echo "$IP_MATCHES" | head -1 | cut -c1-120)
-    FINDINGS="${FINDINGS}build.rs: hardcoded IP addresses (${COUNT} matches, first: ${FIRST}); "
+    BUILD_FINDINGS="${BUILD_FINDINGS}hardcoded IP addresses (${COUNT} matches, first: ${FIRST}); "
   fi
 
   if [ -n "$URL_MATCHES" ]; then
     COUNT=$(echo "$URL_MATCHES" | wc -l | tr -d ' ')
     FIRST=$(echo "$URL_MATCHES" | head -1 | cut -c1-120)
-    FINDINGS="${FINDINGS}build.rs: URLs to untrusted domains (${COUNT} matches, first: ${FIRST}); "
+    BUILD_FINDINGS="${BUILD_FINDINGS}URLs to untrusted domains (${COUNT} matches, first: ${FIRST}); "
   fi
 fi
 
@@ -44,20 +49,29 @@ RT_URL_MATCHES=$(rg --no-filename -n 'https?://[^\s"'\'']+' "$SOURCE_DIR" --type
 if [ -n "$RT_IP_MATCHES" ]; then
   COUNT=$(echo "$RT_IP_MATCHES" | wc -l | tr -d ' ')
   FIRST=$(echo "$RT_IP_MATCHES" | head -1 | cut -c1-120)
-  FINDINGS="${FINDINGS}runtime: hardcoded IP addresses (${COUNT} matches, first: ${FIRST}); "
+  RUNTIME_FINDINGS="${RUNTIME_FINDINGS}hardcoded IP addresses (${COUNT} matches, first: ${FIRST}); "
 fi
 
 if [ -n "$RT_URL_MATCHES" ]; then
   COUNT=$(echo "$RT_URL_MATCHES" | wc -l | tr -d ' ')
   FIRST=$(echo "$RT_URL_MATCHES" | head -1 | cut -c1-120)
-  FINDINGS="${FINDINGS}runtime: URLs to untrusted domains (${COUNT} matches, first: ${FIRST}); "
+  RUNTIME_FINDINGS="${RUNTIME_FINDINGS}URLs to untrusted domains (${COUNT} matches, first: ${FIRST}); "
 fi
 
-if [ -n "$FINDINGS" ]; then
+if [ -n "$BUILD_FINDINGS" ]; then
   jq -n -c \
-    --arg id "hardcoded_urls" \
+    --arg id "hardcoded_build_targets" \
     --argjson tier 1 \
     --argjson points 25 \
-    --arg detail "Hardcoded network targets found: ${FINDINGS}" \
+    --arg detail "build.rs contains hardcoded network targets: ${BUILD_FINDINGS}" \
+    '{id: $id, tier: $tier, points: $points, detail: $detail}'
+fi
+
+if [ -n "$RUNTIME_FINDINGS" ]; then
+  jq -n -c \
+    --arg id "runtime_network_targets" \
+    --argjson tier 3 \
+    --argjson points 3 \
+    --arg detail "Runtime source contains hardcoded network targets: ${RUNTIME_FINDINGS}" \
     '{id: $id, tier: $tier, points: $points, detail: $detail}'
 fi
