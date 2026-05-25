@@ -531,6 +531,7 @@ jobs:
 
           GENERATED_REPORTS_DIR=$(mktemp -d)
           cp -a reports "${GENERATED_REPORTS_DIR}/reports"
+          rm -rf reports
 
           git fetch origin "${BRANCH}" || true
           if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
@@ -539,7 +540,6 @@ jobs:
             git checkout -b "${BRANCH}"
           fi
 
-          rm -rf reports
           cp -a "${GENERATED_REPORTS_DIR}/reports" reports
 
           git add reports/
