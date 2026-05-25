@@ -529,16 +529,32 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git checkout -b "${BRANCH}"
-          git add reports/
-          git commit -m "analyze: ${CRATE}@${VERSION}
+          git fetch origin "${BRANCH}" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH}"; then
+            git checkout -B "${BRANCH}" "origin/${BRANCH}"
+          else
+            git checkout -b "${BRANCH}"
+          fi
 
-          Automated supply-chain analysis of ${CRATE} v${VERSION} and its dependencies."
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+          else
+            git commit -m "analyze: ${CRATE}@${VERSION}
+
+            Automated supply-chain analysis of ${CRATE} v${VERSION} and its dependencies."
+          fi
 
           git push origin "${BRANCH}"
 
-          gh pr create \
+          if gh pr view "${BRANCH}" --json url --jq .url >/dev/null 2>&1; then
+            gh pr edit "${BRANCH}" \
+              --title "${RISK} analyze: ${CRATE}@${VERSION}" \
+              --body-file pr_body.md
+          else
+            gh pr create \
             --title "${RISK} analyze: ${CRATE}@${VERSION}" \
             --body-file pr_body.md \
             --base main \
             --head "${BRANCH}"
+          fi
