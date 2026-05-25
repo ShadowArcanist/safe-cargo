@@ -9,12 +9,28 @@ PREV_VERSIONS_DIR="${2:?Missing prev_versions_dir}"
 
 [ -d "$PREV_VERSIONS_DIR" ] || exit 0
 
+package_root() {
+  local dir="$1"
+  if [ -f "${dir}/Cargo.toml" ]; then
+    printf '%s\n' "$dir"
+    return
+  fi
+  local cargo_toml
+  cargo_toml=$(find "$dir" -maxdepth 2 -name "Cargo.toml" -print -quit 2>/dev/null || true)
+  if [ -n "$cargo_toml" ]; then
+    dirname "$cargo_toml"
+  else
+    printf '%s\n' "$dir"
+  fi
+}
+
 # Find the most recent previous version
 LATEST_PREV=$(ls -1 "$PREV_VERSIONS_DIR" 2>/dev/null | sort -V | tail -1 || true)
 [ -z "$LATEST_PREV" ] && exit 0
 [ -d "${PREV_VERSIONS_DIR}/${LATEST_PREV}" ] || exit 0
+PREV_ROOT=$(package_root "${PREV_VERSIONS_DIR}/${LATEST_PREV}")
 
-DIFF_BRIEF=$(diff -r --brief "$SOURCE_DIR" "${PREV_VERSIONS_DIR}/${LATEST_PREV}" 2>/dev/null || true)
+DIFF_BRIEF=$(diff -r --brief "$SOURCE_DIR" "$PREV_ROOT" 2>/dev/null || true)
 
 # Count changed lines between versions
 DIFF_LINES=$(printf '%s\n' "$DIFF_BRIEF" | wc -l | tr -d ' ')
@@ -37,7 +53,7 @@ done <<< "$DIFF_BRIEF"
 
 # Also count lines from files only in one version
 ONLY_IN_CURRENT=$(printf '%s\n' "$DIFF_BRIEF" | awk -v dir="$SOURCE_DIR" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
-ONLY_IN_PREV=$(printf '%s\n' "$DIFF_BRIEF" | awk -v dir="${PREV_VERSIONS_DIR}/${LATEST_PREV}" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
+ONLY_IN_PREV=$(printf '%s\n' "$DIFF_BRIEF" | awk -v dir="$PREV_ROOT" 'index($0, "Only in " dir) == 1' | wc -l | tr -d ' ')
 
 TOTAL_CHANGES=$((CHANGED_LINES + ONLY_IN_CURRENT * 50 + ONLY_IN_PREV * 50))
 

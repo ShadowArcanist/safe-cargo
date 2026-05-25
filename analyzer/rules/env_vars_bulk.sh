@@ -6,11 +6,12 @@ set -euo pipefail
 
 SOURCE_DIR="${1:?Usage: env_vars_bulk.sh <source_dir>}"
 
-MATCHES=$(rg -n 'env::vars\b|env::vars_os\b|option_env!' "$SOURCE_DIR" --type rust 2>/dev/null || true)
+MATCHES=$(rg -n 'env::vars\b|env::vars_os\b|option_env!' "$SOURCE_DIR" --type rust 2>/dev/null | \
+  rg -v ':[[:space:]]*(//|///|//!|/\*|\*)' 2>/dev/null || true)
 
 if [ -n "$MATCHES" ]; then
   COUNT=$(echo "$MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$MATCHES" | head -1 | cut -c1-150)
+  FIRST=$(awk 'NR == 1 { print; exit }' <<< "$MATCHES" | cut -c1-150)
   jq -n -c \
     --arg id "env_vars_bulk" \
     --argjson tier 1 \

@@ -272,6 +272,18 @@ jobs:
                 -o "${DEP_NAME}-${PREV_VER}.tar.gz"; then
                 python3 "${GITHUB_WORKSPACE}/analyzer/safe_extract.py" \
                   "${DEP_NAME}-${PREV_VER}.tar.gz" "${PREV_DEST}" 2>/dev/null || true
+                if [ ! -f "${PREV_DEST}/Cargo.toml" ]; then
+                  PREV_CARGO_TOML=$(find "${PREV_DEST}" -maxdepth 2 -name "Cargo.toml" -print -quit 2>/dev/null || true)
+                  if [ -n "$PREV_CARGO_TOML" ]; then
+                    PREV_ROOT=$(dirname "$PREV_CARGO_TOML")
+                    NORMALIZED_PREV=$(mktemp -d)
+                    cp -a "${PREV_ROOT}/." "${NORMALIZED_PREV}/"
+                    rm -rf "${PREV_DEST}"
+                    mkdir -p "${PREV_DEST}"
+                    cp -a "${NORMALIZED_PREV}/." "${PREV_DEST}/"
+                    rm -rf "${NORMALIZED_PREV}"
+                  fi
+                fi
               fi
               cd "${DOWNLOAD_DIR}"
               sleep 1  # Rate limit crates.io

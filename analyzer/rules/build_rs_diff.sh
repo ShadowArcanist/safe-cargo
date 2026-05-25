@@ -9,6 +9,21 @@ PREV_VERSIONS_DIR="${2:?Missing prev_versions_dir}"
 
 BUILD_RS="${SOURCE_DIR}/build.rs"
 
+package_root() {
+  local dir="$1"
+  if [ -f "${dir}/Cargo.toml" ]; then
+    printf '%s\n' "$dir"
+    return
+  fi
+  local cargo_toml
+  cargo_toml=$(find "$dir" -maxdepth 2 -name "Cargo.toml" -print -quit 2>/dev/null || true)
+  if [ -n "$cargo_toml" ]; then
+    dirname "$cargo_toml"
+  else
+    printf '%s\n' "$dir"
+  fi
+}
+
 # If no build.rs in current version, nothing to flag
 [ -f "$BUILD_RS" ] || exit 0
 
@@ -18,8 +33,9 @@ BUILD_RS="${SOURCE_DIR}/build.rs"
 # Find the most recent previous version
 LATEST_PREV=$(ls -1 "$PREV_VERSIONS_DIR" 2>/dev/null | sort -V | tail -1 || true)
 [ -z "$LATEST_PREV" ] && exit 0
+PREV_ROOT=$(package_root "${PREV_VERSIONS_DIR}/${LATEST_PREV}")
 
-PREV_BUILD_RS="${PREV_VERSIONS_DIR}/${LATEST_PREV}/build.rs"
+PREV_BUILD_RS="${PREV_ROOT}/build.rs"
 
 if [ ! -f "$PREV_BUILD_RS" ]; then
   # build.rs is NEW in this version

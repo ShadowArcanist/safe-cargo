@@ -6,6 +6,21 @@ set -euo pipefail
 SOURCE_DIR="${1:?Usage: unsafe_blocks.sh <source_dir> [prev_versions_dir]}"
 PREV_VERSIONS_DIR="${2:-}"
 
+package_root() {
+  local dir="$1"
+  if [ -f "${dir}/Cargo.toml" ]; then
+    printf '%s\n' "$dir"
+    return
+  fi
+  local cargo_toml
+  cargo_toml=$(find "$dir" -maxdepth 2 -name "Cargo.toml" -print -quit 2>/dev/null || true)
+  if [ -n "$cargo_toml" ]; then
+    dirname "$cargo_toml"
+  else
+    printf '%s\n' "$dir"
+  fi
+}
+
 # Count unsafe blocks in current version
 CURRENT_COUNT=$(rg -c 'unsafe\s*\{' "$SOURCE_DIR" --type rust 2>/dev/null | \
   awk -F: '{sum += $NF} END {print sum+0}' || echo "0")
@@ -17,7 +32,8 @@ if [ -n "$PREV_VERSIONS_DIR" ] && [ -d "$PREV_VERSIONS_DIR" ]; then
   LATEST_PREV=$(ls -1 "$PREV_VERSIONS_DIR" 2>/dev/null | sort -V | tail -1 || true)
   if [ -n "$LATEST_PREV" ] && [ -d "${PREV_VERSIONS_DIR}/${LATEST_PREV}" ]; then
     PREV_VERSION="$LATEST_PREV"
-    PREV_COUNT=$(rg -c 'unsafe\s*\{' "${PREV_VERSIONS_DIR}/${LATEST_PREV}" --type rust 2>/dev/null | \
+    PREV_ROOT=$(package_root "${PREV_VERSIONS_DIR}/${LATEST_PREV}")
+    PREV_COUNT=$(rg -c 'unsafe\s*\{' "$PREV_ROOT" --type rust 2>/dev/null | \
       awk -F: '{sum += $NF} END {print sum+0}' || echo "0")
   fi
 fi

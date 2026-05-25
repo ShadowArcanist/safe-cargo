@@ -8,40 +8,39 @@ SOURCE_DIR="${1:?Usage: dynamic_loading.sh <source_dir>}"
 
 FINDINGS=""
 
+filter_code_lines() {
+  rg -v ':[[:space:]]*(//|///|//!|/\*|\*)' 2>/dev/null || true
+}
+
+first_line() {
+  awk 'NR == 1 { print; exit }' <<< "$1" | cut -c1-120
+}
+
 # Detect libloading crate usage
-LIBLOADING_MATCHES=$(rg -n 'libloading::Library|Library::new|libloading::Symbol' "$SOURCE_DIR" --type rust 2>/dev/null || true)
+LIBLOADING_MATCHES=$(rg -n 'libloading::Library|Library::new|libloading::Symbol' "$SOURCE_DIR" --type rust 2>/dev/null | filter_code_lines || true)
 
 if [ -n "$LIBLOADING_MATCHES" ]; then
   COUNT=$(echo "$LIBLOADING_MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$LIBLOADING_MATCHES" | head -1 | cut -c1-120)
+  FIRST=$(first_line "$LIBLOADING_MATCHES")
   FINDINGS="${FINDINGS}libloading crate usage (${COUNT} matches, first: ${FIRST}); "
 fi
 
 # Detect dlopen calls
-DLOPEN_MATCHES=$(rg -n 'dlopen|dlsym|dlclose' "$SOURCE_DIR" --type rust 2>/dev/null || true)
+DLOPEN_MATCHES=$(rg -n 'dlopen|dlsym|dlclose' "$SOURCE_DIR" --type rust 2>/dev/null | filter_code_lines || true)
 
 if [ -n "$DLOPEN_MATCHES" ]; then
   COUNT=$(echo "$DLOPEN_MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$DLOPEN_MATCHES" | head -1 | cut -c1-120)
+  FIRST=$(first_line "$DLOPEN_MATCHES")
   FINDINGS="${FINDINGS}dlopen/dlsym calls (${COUNT} matches, first: ${FIRST}); "
 fi
 
 # Detect Windows LoadLibrary
-LOADLIB_MATCHES=$(rg -n 'LoadLibrary|GetProcAddress' "$SOURCE_DIR" --type rust 2>/dev/null || true)
+LOADLIB_MATCHES=$(rg -n 'LoadLibrary|GetProcAddress' "$SOURCE_DIR" --type rust 2>/dev/null | filter_code_lines || true)
 
 if [ -n "$LOADLIB_MATCHES" ]; then
   COUNT=$(echo "$LOADLIB_MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$LOADLIB_MATCHES" | head -1 | cut -c1-120)
+  FIRST=$(first_line "$LOADLIB_MATCHES")
   FINDINGS="${FINDINGS}Windows dynamic loading (${COUNT} matches, first: ${FIRST}); "
-fi
-
-# Detect std::os::unix::ffi patterns used with dynamic loading
-UNIX_FFI_MATCHES=$(rg -n 'std::os::unix::ffi' "$SOURCE_DIR" --type rust 2>/dev/null || true)
-
-if [ -n "$UNIX_FFI_MATCHES" ]; then
-  COUNT=$(echo "$UNIX_FFI_MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$UNIX_FFI_MATCHES" | head -1 | cut -c1-120)
-  FINDINGS="${FINDINGS}Unix FFI patterns (${COUNT} matches, first: ${FIRST}); "
 fi
 
 if [ -n "$FINDINGS" ]; then

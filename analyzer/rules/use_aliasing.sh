@@ -6,13 +6,15 @@ set -euo pipefail
 
 SOURCE_DIR="${1:?Usage: use_aliasing.sh <source_dir>}"
 
-# Search for use ... as ... patterns on security-sensitive std modules
-# Covers: std::net, std::process, std::fs, std::env, std::os
-ALIAS_MATCHES=$(rg -n 'use\s+std::(net|process|fs|env|os)\b.*\bas\b' "$SOURCE_DIR" --type rust 2>/dev/null || true)
+# Search for aliases that obscure the module root itself, e.g.
+# `use std::process as p;`. Renaming individual types such as
+# `Command as StdCommand` is common and not a useful supply-chain signal.
+ALIAS_MATCHES=$(rg -n 'use\s+std::(net|process|fs|env|os)\s+as\s+' "$SOURCE_DIR" --type rust 2>/dev/null | \
+  rg -v ':[[:space:]]*(//|///|//!|/\*|\*)' 2>/dev/null || true)
 
 if [ -n "$ALIAS_MATCHES" ]; then
   COUNT=$(echo "$ALIAS_MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$ALIAS_MATCHES" | head -1 | cut -c1-120)
+  FIRST=$(awk 'NR == 1 { print; exit }' <<< "$ALIAS_MATCHES" | cut -c1-120)
   jq -n -c \
     --arg id "use_aliasing" \
     --argjson tier 2 \

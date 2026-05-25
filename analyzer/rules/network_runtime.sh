@@ -6,11 +6,12 @@ set -euo pipefail
 SOURCE_DIR="${1:?Usage: network_runtime.sh <source_dir>}"
 
 # Exclude build.rs — that's covered by network_build_rs.sh (Tier 1)
-MATCHES=$(rg -n 'reqwest|ureq|hyper::client|TcpStream|UdpSocket|tokio::net::' "$SOURCE_DIR" --type rust --glob '!build.rs' 2>/dev/null || true)
+MATCHES=$(rg -n 'reqwest|ureq|hyper::client|TcpStream|UdpSocket|tokio::net::' "$SOURCE_DIR" --type rust --glob '!build.rs' --glob '!tests/**' --glob '!benches/**' --glob '!examples/**' 2>/dev/null | \
+  rg -v ':[[:space:]]*(//|///|//!|/\*|\*)' 2>/dev/null || true)
 
 if [ -n "$MATCHES" ]; then
   COUNT=$(echo "$MATCHES" | wc -l | tr -d ' ')
-  FIRST=$(echo "$MATCHES" | head -1 | cut -c1-120)
+  FIRST=$(awk 'NR == 1 { print; exit }' <<< "$MATCHES" | cut -c1-120)
   jq -n -c \
     --arg id "network_runtime" \
     --argjson tier 2 \
