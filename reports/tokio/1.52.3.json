@@ -1,0 +1,87 @@
+{
+  "crate_name": "tokio",
+  "version": "1.52.3",
+  "published_at": "2026-05-08T12:53:27.539099Z",
+  "analyzed_at": "2026-05-25T12:45:23Z",
+  "release_age_days": 16,
+  "score": 29,
+  "verdict": "WARN",
+  "triggered_rules": [
+    {
+      "id": "runtime_network_targets",
+      "tier": 3,
+      "points": 3,
+      "detail": "Runtime source contains hardcoded network targets: URLs to untrusted domains (50 matches, first: 674:        /// [1]: https://msdn.microsoft.com/en-us/library/windows/desktop/ms684863(v=vs.85).aspx); "
+    },
+    {
+      "id": "include_code_macros",
+      "tier": 2,
+      "points": 10,
+      "detail": "Uses include! macros or #[path =] overrides (8 occurrences). These can substitute Rust code at compile time. First: /tmp/tmp.XeJTPpMXHS/current/tokio-1.52.3/src/process/mod.rs:229:#[path = \"unix/mod.rs\"]"
+    },
+    {
+      "id": "network_runtime",
+      "tier": 2,
+      "points": 10,
+      "detail": "Runtime source contains network code (300 matches, excluding build.rs). First: /tmp/tmp.XeJTPpMXHS/current/tokio-1.52.3/tests/tcp_accept.rs:13:use tokio::net::{TcpListener, TcpStream};"
+    },
+    {
+      "id": "unix_socket_usage",
+      "tier": 3,
+      "points": 3,
+      "detail": "Unix socket usage found: Unix domain sockets (21 matches, first: /tmp/tmp.XeJTPpMXHS/current/tokio-1.52.3/tests/net_panic.rs:107:    let std_listener = std::os::unix::net::UnixListener:); "
+    },
+    {
+      "id": "unsafe_blocks",
+      "tier": 3,
+      "points": 3,
+      "detail": "unsafe blocks increased by 1 (753 -> 754) vs previous version 1.52.2."
+    }
+  ],
+  "rules_executed": [
+    "network_build_rs",
+    "process_spawn",
+    "encoded_strings",
+    "env_exfil",
+    "hardcoded_urls",
+    "include_macros",
+    "env_vars_bulk",
+    "asm_ffi",
+    "dynamic_loading",
+    "build_rs_diff",
+    "fs_outside_outdir",
+    "proc_macro_side_effects",
+    "massive_diff",
+    "new_maintainer",
+    "network_runtime",
+    "unix_net_proc",
+    "use_aliasing",
+    "unsafe_blocks",
+    "dep_additions",
+    "build_rs_present",
+    "release_age"
+  ],
+  "rules_failed": [],
+  "delta": {
+    "compared_versions": [
+      "1.52.0",
+      "1.52.1",
+      "1.52.2"
+    ],
+    "lines_added": 300,
+    "lines_removed": 73,
+    "new_files": [],
+    "build_rs_changed": false,
+    "deps_added": [],
+    "deps_removed": []
+  },
+  "metadata": {
+    "owners": [
+      "carllerche",
+      "Darksonn",
+      "github:tokio-rs:core"
+    ],
+    "repository": "https://github.com/tokio-rs/tokio",
+    "downloads": 7601162
+  }
+}

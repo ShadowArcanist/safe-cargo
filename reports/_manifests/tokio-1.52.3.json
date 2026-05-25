@@ -1,0 +1,15 @@
+{
+  "requested_crate": "tokio",
+  "requested_version": "1.52.3",
+  "analyzed_at": "2026-05-25T12:45:25Z",
+  "dependencies": [
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17"
+    },
+    {
+      "name": "tokio",
+      "version": "1.52.3"
+    }
+  ]
+}
