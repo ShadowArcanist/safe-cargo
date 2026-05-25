@@ -521,6 +521,7 @@ jobs:
           CRATE: ${{ steps.resolve.outputs.crate }}
           VERSION: ${{ steps.resolve.outputs.version }}
           RISK: ${{ steps.summary.outputs.risk }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           SAFE_CRATE=$(echo "${CRATE}" | tr -dc 'a-zA-Z0-9_-')
           SAFE_VERSION=$(echo "${VERSION}" | tr -dc 'a-zA-Z0-9._-')
@@ -540,6 +541,7 @@ jobs:
             git checkout -b "${BRANCH}"
           fi
 
+          rm -rf reports
           cp -a "${GENERATED_REPORTS_DIR}/reports" reports
 
           git add reports/
@@ -561,6 +563,6 @@ jobs:
             gh pr create \
             --title "${RISK} analyze: ${CRATE}@${VERSION}" \
             --body-file pr_body.md \
-            --base main \
+            --base "${BASE_BRANCH}" \
             --head "${BRANCH}"
           fi
