@@ -203,6 +203,8 @@ print(json.dumps({
   fi
 fi
 
+echo "DEBUG: Building delta JSON..." >&2
+echo "DEBUG: LINES_ADDED=${LINES_ADDED:-0} LINES_REMOVED=${LINES_REMOVED:-0}" >&2
 DELTA=$(jq -n \
   --argjson compared_versions "${COMPARED_VERSIONS:-[]}" \
   --argjson lines_added "${LINES_ADDED:-0}" \
@@ -221,21 +223,22 @@ DELTA=$(jq -n \
     deps_removed: $deps_removed
   }')
 
-# Generate final report JSON
+echo "DEBUG: Building final report JSON..." >&2
+echo "DEBUG: TOTAL_SCORE=${TOTAL_SCORE:-?} DOWNLOADS=${DOWNLOADS:-?} AGE_DAYS=${AGE_DAYS:-?}" >&2
 jq -n \
   --arg crate_name "$CRATE_NAME" \
   --arg version "$VERSION" \
   --arg published_at "$PUBLISHED" \
   --argjson release_age_days "${AGE_DAYS:-0}" \
-  --argjson score "$TOTAL_SCORE" \
-  --arg verdict "$VERDICT" \
-  --argjson triggered_rules "$FINDINGS" \
+  --argjson score "${TOTAL_SCORE:-0}" \
+  --arg verdict "${VERDICT:-FAIL}" \
+  --argjson triggered_rules "${FINDINGS:-[]}" \
   --argjson downloads "${DOWNLOADS:-0}" \
   --arg repo "${REPO:-}" \
   --argjson owners "${OWNERS:-[]}" \
-  --argjson delta "$DELTA" \
-  --argjson rules_executed "$RULES_EXECUTED" \
-  --argjson rules_failed "$RULES_FAILED" \
+  --argjson delta "${DELTA:-{}}" \
+  --argjson rules_executed "${RULES_EXECUTED:-[]}" \
+  --argjson rules_failed "${RULES_FAILED:-[]}" \
   '{
     crate_name: $crate_name,
     version: $version,
