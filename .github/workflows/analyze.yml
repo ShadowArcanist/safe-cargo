@@ -567,14 +567,28 @@ jobs:
 
           git push origin "${BRANCH}"
 
-          if gh pr view "${BRANCH}" --json url --jq .url >/dev/null 2>&1; then
+          PR_URL=$(gh pr list \
+            --head "${BRANCH}" \
+            --base "${BASE_BRANCH}" \
+            --state open \
+            --json url \
+            --jq '.[0].url // empty')
+
+          if [ -n "$PR_URL" ]; then
             gh pr edit "${BRANCH}" \
               --title "${RISK} analyze: ${CRATE}@${VERSION}" \
               --body-file pr_body.md
+            echo "Updated analysis PR: ${PR_URL}"
           else
-            gh pr create \
-            --title "${RISK} analyze: ${CRATE}@${VERSION}" \
-            --body-file pr_body.md \
-            --base "${BASE_BRANCH}" \
-            --head "${BRANCH}"
+            PR_URL=$(gh pr create \
+              --title "${RISK} analyze: ${CRATE}@${VERSION}" \
+              --body-file pr_body.md \
+              --base "${BASE_BRANCH}" \
+              --head "${BRANCH}")
+            echo "Created analysis PR: ${PR_URL}"
+          fi
+
+          if [ -z "$PR_URL" ]; then
+            echo "::error::No pull request URL returned by GitHub CLI"
+            exit 1
           fi
